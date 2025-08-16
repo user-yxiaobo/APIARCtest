@@ -1,0 +1,326 @@
+# 读取配置文件
+configfile: "config.yaml"
+# 从配置文件中获取 Conda 安装路径
+conda_install_path = config["conda_install_path"]
+#初始化预运行环境
+shell.prefix(f"source ~/.bashrc; source {conda_install_path}/etc/profile.d/conda.sh; conda activate APIARC; ")
+
+
+# 分类单双端样本
+sample_IDs, comps, =glob_wildcards("fastqfile/{sample}_1.fastq{comp,(\.gz)?}")
+paired_end = []
+single_end = []
+for sample in sample_IDs:
+    # 检查是否存在对应的 _2 文件
+    if os.path.exists(f"fastqfile/{sample}_2.fastq") or os.path.exists(f"fastqfile/{sample}_2.fastq.gz"):
+        paired_end.append(sample)  
+    else:
+        single_end.append(sample)  
+print(paired_end)
+print(single_end)
+
+
+
+#生成输出文件
+rule all:
+    input:
+        expand("QCfile/{sample}_1_val_1.fq.gz" ,sample=paired_end),
+        expand("QCfile/{sample}_1_trimmed.fq.gz", sample=single_end),
+        expand("QCfile/fastp/paired/{sample}_clean_1.fq.gz" ,sample=paired_end),
+        expand("QCfile/fastp/paired/{sample}_clean_2.fq.gz" ,sample=paired_end),
+        expand("QCfile/fastp/paired/{sample}.json" ,sample=paired_end),
+        expand("QCfile/fastp/paired/{sample}.html" ,sample=paired_end),
+        expand("QCfile/fastp/single/{sample}_clean.fq.gz" ,sample=single_end),
+        expand("QCfile/fastp/single/{sample}.json" ,sample=single_end),
+        expand("QCfile/fastp/single/{sample}.html" ,sample=single_end),
+        expand("mapping/{sample}.sam", sample=sample_IDs),
+        expand("logs/hisat2_summary.log"),
+        expand("mapping/{sample}_filtered.sam", sample=sample_IDs),
+        expand("mapping/{sample}_sorted.bam", sample=sample_IDs),
+        expand("mapping/{sample}_sorted.bam.bai", sample=sample_IDs),
+        expand("mapping/{sample}.dedup.bam", sample=sample_IDs),
+        expand("mapping/{sample}.dedup.bam.bai", sample=sample_IDs),
+        expand("expression/{sample}.transcripts.gtf", sample=sample_IDs),
+        expand("expression/sample_list.txt"),
+        expand("DEG/gene_count_matrix.csv"),
+        expand("DEG/transcript_count_matrix.csv"),
+        expand("DEG/result.csv"),
+        expand("DEG/UP_genes_name.csv"),
+        expand("DEG/DOWN_genes_name.csv"),
+        expand("picture/DOX/sample_PCA.pdf"),
+
+
+# 双端处理规则
+rule paired_trimmed:
+    input:
+        p1 = "fastqfile/{sample}_1.fastq",
+        p2 = "fastqfile/{sample}_2.fastq"
+    output:
+        qc1 = "QCfile/{sample}_1_val_1.fq.gz",
+        qc2 = "QCfile/{sample}_2_val_2.fq.gz"    
+    params:
+        threads=config["threads"]["trim_galore"],
+        output_dir=directory("QCfile")
+    shell:
+        "trim_galore --paired --fastqc --cores {params.threads} --gzip -o {params.output_dir} {input.p1} {input.p2}"
+        
+# 压缩格式双端处理规则
+rule paired_trimmed_gz:
+    input:
+        p1 = "fastqfile/{sample}_1.fastq.gz",
+        p2 = "fastqfile/{sample}_2.fastq.gz"
+    output:
+        qc1 = "QCfile/{sample}_1_val_1.fq.gz",
+        qc2 = "QCfile/{sample}_2_val_2.fq.gz"      
+    params:
+        threads=config["threads"]["trim_galore"],
+        output_dir=directory("QCfile")
+    shell:
+        "trim_galore --paired --fastqc --cores {params.threads} --gzip -o {params.output_dir} {input.p1} {input.p2}"
+        
+# 单端处理规则
+rule single_trimmed:
+    input:
+        "fastqfile/{sample}_1.fastq"
+    output:
+        "QCfile/{sample}_1_trimmed.fq.gz"  
+    params:
+        threads=config["threads"]["trim_galore"],
+        output_dir=directory("QCfile")
+    shell:
+        "trim_galore --fastqc --cores {params.threads} --gzip -o {params.output_dir} {input}"
+        
+# 压缩格式单端处理规则
+rule single_trimmed_gz:
+    input:
+        "fastqfile/{sample}_1.fastq.gz"
+    output:
+        "QCfile/{sample}_1_trimmed.fq.gz" 
+    params:
+        threads=config["threads"]["trim_galore"],
+        output_dir=directory("QCfile")
+    shell:
+        "trim_galore --fastqc --cores {params.threads} --gzip -o {params.output_dir} {input}"
+
+
+# #fastp双端处理
+# rule paired_fastp:
+#     input:
+#         qc1 = "QCfile/{sample}_1_val_1.fq.gz",
+#         qc2 = "QCfile/{sample}_2_val_2.fq.gz"
+#     output:
+#         clean1 = "QCfile/fastp/paired/{sample}_clean_1.fq.gz",
+#         clean2 = "QCfile/fastp/paired/{sample}_clean_2.fq.gz",
+#         json = "QCfile/fastp/paired/{sample}.json",
+#         html = "QCfile/fastp/paired/{sample}.html"
+#     params:
+#         threads=config["threads"]["fastp"]
+#     shell:
+#         "fastp -w {params.threads} -q 20 -l 36 -n 3 -j {output.json} -h {output.html} -i {input.qc1} -I {input.qc2} -o {output.clean1} -O {output.clean2}"
+
+# #fastp单端处理
+# rule single_fastp:
+#     input:
+#         "QCfile/{sample}_1_trimmed.fq.gz"
+#     output:
+#         clean = "QCfile/fastp/single/{sample}_clean.fq.gz",
+#         json = "QCfile/fastp/single/{sample}.json",
+#         html = "QCfile/fastp/single/{sample}.html"
+#     params:
+#         threads=config["threads"]["fastp"]
+#     shell:
+#         "fastp -w {params.threads} -q 20 -l 36 -n 3 -j {output.json} -h {output.html} -i {input} -o {output.clean}"
+
+
+
+#比对
+rule hisat2:
+    input:
+        lambda wildcards: (
+            [
+                "QCfile/{sample}_1_val_1.fq.gz",
+                "QCfile/{sample}_2_val_2.fq.gz"
+            ] 
+            if wildcards.sample in paired_end  
+            else "QCfile/{sample}_1_trimmed.fq.gz" 
+        )
+    output:
+        sam = "mapping/{sample}.sam",
+        sample_log = temp("logs/hisat2_tmp/{sample}.log")
+    params:
+        threads=config["threads"]["hisat2"],
+        indexdir=config["genome"]["indexdir"],
+        # 动态生成比对参数
+        hisat_opts=lambda wc, input: (
+            f"--dta -1 {input[0]} -2 {input[1]}"  
+            if wc.sample in paired_end 
+            else f"--dta -U {input}"  
+        )
+    shell:
+        """
+        hisat2 -x {params.indexdir} \
+            -p {params.threads} \
+            --rg-id {wildcards.sample} \
+            --rg SM:{wildcards.sample} \
+            {params.hisat_opts} \
+            -S {output.sam} 2> {output.sample_log}
+        """
+        "hisat2 -x $indexdir -p $threads --dta --rg-id $sample_id --rg SM:$sample_id -1 $fq1_trimmed -2 $fq2_trimmed -S $sample_dir/$sample_id.sam 2> $sample_hisat2_log"
+
+#比对日志合并
+rule merge_hisat_logs:
+    input:
+        logs = expand("logs/hisat2_tmp/{sample}.log", sample=sample_IDs),
+        sam_files = expand("mapping/{sample}.sam", sample=sample_IDs)  
+    output:
+        summary = "logs/hisat2_summary.log"  
+    run:
+        with open(output.summary, "w") as f_sum:
+            for log_file in input.logs:
+                sample = os.path.basename(log_file).replace(".log", "")
+                f_sum.write(f"===== {sample} =====\n")
+                with open(log_file) as f_log:
+                    f_sum.write(f_log.read())
+                f_sum.write("\n")
+
+
+#过滤sam文件
+rule filtered:
+    input:
+        "mapping/{sample}.sam"
+    output:
+        "mapping/{sample}_filtered.sam"
+    shell:
+        "grep -v -E -w 'NH:i:[2-9]|NH:i:1[0-9]|NH:i:20' {input} > {output}"
+        
+
+#将sam文件转换为bam文件并排序
+rule samtools:
+    input:
+        "mapping/{sample}_filtered.sam"
+    output:
+        "mapping/{sample}_sorted.bam"
+    params:
+        threads=config["threads"]["samtools"]
+    shell:
+        "samtools view -bS {input} | samtools sort -@ {params.threads} -o {output}"
+        
+
+#索引bam文件
+rule samtools_index:
+    input:
+        "mapping/{sample}_sorted.bam"
+    output:
+        "mapping/{sample}_sorted.bam.bai"
+    shell:
+        "samtools index {input}"
+        
+
+#去重
+rule picard:
+    input:
+        "mapping/{sample}_sorted.bam"
+    output:
+        dedup_bam="mapping/{sample}.dedup.bam",
+        metrics_file="mapping/{sample}.metricsFile"
+    params:
+        picarddir=config["picard"]["picarddir"],
+        java_mem=config["picard"]["java_mem"],
+        remove_dups=config["picard"]["remove_dups"]  
+    shell:
+        "java {params.java_mem} -jar {params.picarddir}/picard.jar MarkDuplicates I={input} O={output.dedup_bam} METRICS_FILE={output.metrics_file} REMOVE_DUPLICATES={params.remove_dups} ASSUME_SORT_ORDER=coordinate"
+        
+
+#索引去重后的bam文件
+rule picard_index:
+    input:
+        "mapping/{sample}.dedup.bam"
+    output:
+        "mapping/{sample}.dedup.bam.bai"
+    shell:
+        "env samtools index {input}"
+        
+
+#组转转录本
+rule stringtie:
+    input:
+        "mapping/{sample}.dedup.bam"
+    output:
+        transcripts_gtf="expression/{sample}.transcripts.gtf",
+        gene_abundance_txt="expression/{sample}.gene_abundance.txt"
+    params:
+        threads=config["threads"]["stringtie"],
+        gfffile=config["genome"]["gfffile"]
+    shell:
+        "env stringtie -p {params.threads} -e -B -G {params.gfffile} -A {output.gene_abundance_txt} -o {output.transcripts_gtf} {input}"
+        
+
+#生成列表文件
+rule generate_sample_list:
+    input:
+        config_file = "config.yaml",
+        required_gtf = expand("expression/{sample}.transcripts.gtf", sample=sample_IDs)
+    output:
+        "expression/sample_list.txt"  
+    run:
+        import yaml
+        from pathlib import Path
+        
+        # 确保输出目录存在
+        Path(output[0]).parent.mkdir(parents=True, exist_ok=True)
+        
+        with open(input.config_file) as f_in:
+            config = yaml.safe_load(f_in)
+        
+        # 获取names部分配置
+        names_config = config.get("names", {})
+        
+        # 生成样本列表内容
+        with open(output[0], "w") as f_out:
+            for sample_name, srr_id in names_config.items():
+                gtf_path = f"expression/{srr_id}.transcripts.gtf"
+                f_out.write(f"{sample_name}\t{gtf_path}\n")
+
+#基因与转录本表达矩阵转换
+rule prepDE_py3:
+    input:
+        "expression/sample_list.txt"
+    output:
+        gene_count_matrix="DEG/gene_count_matrix.csv",
+        transcript_count_matrix="DEG/transcript_count_matrix.csv"
+    shell:
+        "python scripts/prepDE.py3 -i {input} -g {output.gene_count_matrix} -t {output.transcript_count_matrix}"
+
+
+
+
+#差异分析
+rule deseq2:
+    input:
+        gene_count_matrix = "DEG/gene_count_matrix.csv",  
+    output:
+        "DEG/result.csv"  
+    params:
+        label = config["group"]["sample_IDs"]  
+    shell:
+        '''
+        Rscript scripts/RNAseq_DEseq.R --input {input.gene_count_matrix} --config "{params.label}" --output {output}
+        '''
+
+# 差异分析绘图
+rule deseq_plot:
+    input:
+        log="logs/hisat2_summary.log",
+        deg_result="DEG/result.csv"
+    output:
+        up_csv="DEG/UP_genes_name.csv",
+        down_csv="DEG/DOWN_genes_name.csv",
+        PCA_pdf="picture/DOX/sample_PCA.pdf"
+    params:
+        updown_dir=directory("DEG"),
+        pdf_dir=directory("picture/DOX")
+    shell:
+        "Rscript scripts/DEseq_result_plot_pipline.R --log {input.log} --deg {input.deg_result} --outdir_table {params.updown_dir} --outdir_plot {params.pdf_dir}"
+
+
+
